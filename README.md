@@ -1,0 +1,2 @@
+# balotly-backend
+Balotly is a self-serve platform for paid campus and school voting — contests, awards, and SUG-style elections — that replaces the usual WhatsApp poster-plus-bank-transfer setup with a shareable link, instant checkout, and a live, tamper-resistant vote count. Every vote is tied to a verified payment via webhook, so organizers get a real-time tally instead of trusting candidates to self-report screenshots.
