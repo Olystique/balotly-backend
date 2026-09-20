@@ -1,0 +1,106 @@
+name: balotly
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: balotly
+      POSTGRES_PASSWORD: balotly
+      POSTGRES_DB: balotly
+    ports:
+      # Host ports are offset by 2 so this stack coexists with Posgage's
+      # (offset by 1) and any Postgres/Redis already running locally.
+      # In-network services still use the standard ports.
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balotly -d balotly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5673:5672"
+      - "15673:15672"  # management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override the localhost defaults in .env with in-network service names.
+      DB_URL: postgresql://balotly:balotly@postgres:5432/balotly
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      # Default all-in-one mode: this API process supervises the workers.
+      # Override to false only with the split profile below.
+      RUN_EMBEDDED_WORKERS: ${RUN_EMBEDDED_WORKERS:-true}
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Future split deployment only. Never enable this profile while the API has
+  # RUN_EMBEDDED_WORKERS=true or queued work will be consumed twice. Use:
+  #   RUN_EMBEDDED_WORKERS=false docker compose --profile split-workers up
+  worker:
+    profiles: ["split-workers"]
+    build: .
+    env_file: .env
+    environment:
+      DB_URL: postgresql://balotly:balotly@postgres:5432/balotly
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RUN_EMBEDDED_WORKERS: "false"
+    # Migrations are owned by the api service; the worker only consumes.
+    # The entrypoint lands with the first consumer (BE-10).
+    command: ["python", "-m", "workers.webhook_consumer"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

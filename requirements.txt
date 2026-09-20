@@ -1,0 +1,16 @@
+fastapi==0.115.12
+starlette==0.46.2
+uvicorn==0.34.2
+pydantic==2.11.4
+pydantic_settings==2.9.1
+python-dotenv==1.1.0
+itsdangerous==2.2.0
+SQLAlchemy==2.0.31
+alembic
+asyncpg
+redis==5.2.1
+aio-pika==9.5.5
+bcrypt
+cryptography
+pytest
+pytest-asyncio
