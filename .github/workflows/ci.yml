@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: balotly
+          POSTGRES_PASSWORD: balotly
+          POSTGRES_DB: balotly
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U balotly -d balotly"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DB_URL: postgresql://balotly:balotly@localhost:5432/balotly
+      REDIS_URL: redis://localhost:6379/0
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+      DEBUG: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write a local .env
+        run: |
+          cp .env.example .env
+          sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" .env
+          sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(python -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())')|" .env
+
+      - name: Syntax check
+        run: python -m compileall -q api workers alembic main.py
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Migrations apply cleanly
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: App starts and answers /health
+        run: |
+          uvicorn main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+            sleep 1
+          done
+          echo "API did not become healthy"; cat uvicorn.log; exit 1
