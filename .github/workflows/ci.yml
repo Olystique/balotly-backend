@@ -1,8 +1,8 @@
-name: CI
+name: Olystique CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
 
 jobs:
